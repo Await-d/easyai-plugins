@@ -10,11 +10,16 @@
 python scripts/validate.py
 ```
 
-全绿才能提 PR。若提示找不到 SDK：
+全绿才能提 PR。
+
+需要能 `import sdk` 才是**严格模式**：
 
 ```bash
 export PYTHONPATH=/path/to/EasyAI/backend   # Windows: $env:PYTHONPATH="E:\...\EasyAI\backend"
 ```
+
+拿不到 SDK 时会降级为 `schema-only`（打印 WARN）：仍会校验 schema 与 8 个契约方法名，
+但**不检查继承与无参构造**。提 PR 前请尽量用严格模式跑一遍。
 
 ---
 

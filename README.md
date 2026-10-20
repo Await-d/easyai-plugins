@@ -114,6 +114,20 @@ python scripts/build_index.py --pack --repo Await-d/easyai-plugins
 
 ---
 
+## 校验的两种模式
+
+| 模式 | 前提 | 覆盖范围 |
+|---|---|---|
+| **`sdk`**（严格） | `import sdk` 可用（主仓 `backend/` 在 `PYTHONPATH`） | schema + `IEnginePlugin` 继承 + 8 方法 + **无参构造** |
+| **`schema-only`**（降级） | 拿不到 SDK，但有 `jsonschema` | 本仓 schema 副本 + **AST** 检查 8 个方法名 |
+
+拿不到 SDK 时脚本会**打印 WARN 并降级**，不会伪装成严格模式；
+降级模式无法验证「继承了 `IEnginePlugin`」和「可无参构造」。
+
+主仓是**私有仓库**，因此 CI 无法匿名 clone。要启用严格模式，请在
+`Settings → Secrets and variables → Actions` 添加 **`EASYAI_CORE_TOKEN`**
+（细粒度 PAT，仅需对 `Await-d/EasyAI` 的 `Contents: Read`）。
+
 ## 贡献
 
 见 [CONTRIBUTING.md](./CONTRIBUTING.md)。核心要求一句话：**`python scripts/validate.py` 全绿**。

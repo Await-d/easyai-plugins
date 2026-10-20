@@ -28,10 +28,25 @@ jobs:
           python-version: "3.11"
 
       - name: Fetch EasyAI core (SDK contracts)
-        # ⚠️ 必须先在本仓库 Settings → Variables 里配置 EASYAI_CORE_REPO=owner/EasyAI，
-        #    否则会去 clone 占位地址而失败。
+        # 主仓是**私有仓库**时，匿名 clone 一定失败，必须提供
+        # secrets.EASYAI_CORE_TOKEN（细粒度 PAT，仅需对主仓的 Contents: Read）。
+        #
+        # 拿不到 SDK 时脚本会降级为 schema-only 校验并打印 WARN ——
+        # **刻意不静默降级**，也不伪造"严格模式通过"。
+        env:
+          CORE_REPO: ${{ vars.EASYAI_CORE_REPO || 'Await-d/EasyAI' }}
+          CORE_TOKEN: ${{ secrets.EASYAI_CORE_TOKEN }}
         run: |
-          git clone --depth 1 "https://github.com/${{ vars.EASYAI_CORE_REPO || 'Await-d/EasyAI' }}" core
+          if [ -n "$CORE_TOKEN" ]; then
+            git clone --depth 1 "https://x-access-token:${CORE_TOKEN}@github.com/${CORE_REPO}" core
+          else
+            echo "::warning::未配置 EASYAI_CORE_TOKEN；若主仓为私有仓库，本次将降级为 schema-only 校验"
+            git clone --depth 1 "https://github.com/${CORE_REPO}" core || true
+          fi
+
+      - name: Install validation deps
+        # 降级模式（拿不到 SDK）下用于校验本仓 schema 副本
+        run: pip install "jsonschema>=4.0"
 
       - name: Validate manifests and contracts
         env:

@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import sys
@@ -55,19 +56,87 @@ class Reporter:
             print(f"[FAIL] {item}", file=sys.stderr)
 
 
-def _load_contracts():
+#: 降级模式下使用的契约方法名（与主仓 `sdk.contracts.REQUIRED_PLUGIN_METHODS` 对齐）。
+#: 只有在拿不到 SDK 时才会用到；**改契约时必须同步这里**。
+FALLBACK_REQUIRED_METHODS = (
+    "initialize",
+    "load",
+    "unload",
+    "synthesize",
+    "synthesize_stream",
+    "cancel",
+    "health",
+    "shutdown",
+)
+
+SCHEMA_PATH = Path("schema") / "plugin-manifest.schema.json"
+
+
+class _ManifestResult:
+    """与 ``sdk.manifest_validator`` 返回值形状兼容的最小结果对象。"""
+
+    def __init__(self, errors: list[str], manifest: dict | None) -> None:
+        self.errors = errors
+        self.warnings: list[str] = []
+        self.manifest = manifest
+
+
+def _jsonschema_validator():
+    """用本仓 ``schema/`` 构造降级校验器（不依赖主仓）。"""
+    try:
+        import jsonschema
+    except ImportError:
+        print(
+            "[FAIL] 既拿不到 EasyAI SDK，也没有 jsonschema 包，无法校验 manifest。\n"
+            "       二选一：\n"
+            "       1) 让主仓的 SDK 可用：export PYTHONPATH=/path/to/EasyAI/backend\n"
+            "       2) pip install jsonschema",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    if not SCHEMA_PATH.is_file():
+        print(f"[FAIL] 缺少 {SCHEMA_PATH}", file=sys.stderr)
+        raise SystemExit(1)
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    def _validate(manifest_path: str) -> _ManifestResult:
+        payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        try:
+            jsonschema.validate(payload, schema)
+        except jsonschema.ValidationError as exc:
+            location = ".".join(str(part) for part in exc.absolute_path) or "<root>"
+            return _ManifestResult(errors=[f"{exc.message}（位置: {location}）"], manifest=None)
+        return _ManifestResult(errors=[], manifest=payload)
+
+    return _validate
+
+
+def _load_validation_backends():
+    """优先用主仓 SDK（严格），否则降级为「本仓 schema + 方法名」校验。
+
+    返回 ``(validate_manifest_file, contract_or_none, required_methods, mode)``。
+
+    ⚠️ 降级模式**不会**检查 ``issubclass(IEnginePlugin)``（没有基类可比），
+    且 schema 是仓库内副本，可能与主仓最新版有偏差。因此降级时**必须**
+    在输出里显式警告，不能让它看起来跟严格模式一样。
+    """
     try:
         from sdk.contracts import IEnginePlugin, REQUIRED_PLUGIN_METHODS
         from sdk.manifest_validator import validate_manifest_file
-    except ImportError as exc:  # pragma: no cover - CI 环境问题
+
+        return validate_manifest_file, IEnginePlugin, REQUIRED_PLUGIN_METHODS, "sdk"
+    except ImportError as exc:  # pragma: no cover - 取决于环境
         print(
-            "[FAIL] 无法导入 EasyAI SDK 契约包。请将主仓的 backend/ 加入 PYTHONPATH，例如：\n"
-            "       export PYTHONPATH=/path/to/EasyAI/backend\n"
-            f"       原始错误: {exc}",
+            f"[WARN] 未找到 EasyAI SDK（{exc.__class__.__name__}），"
+            "降级为 schema-only 校验：\n"
+            "       · manifest 用本仓 schema/ 副本校验（可能与主仓最新版有偏差）\n"
+            "       · 契约只检查 8 个方法名，**跳过** IEnginePlugin 继承检查\n"
+            "       要恢复严格模式：export PYTHONPATH=/path/to/EasyAI/backend\n"
+            "       或在 CI 配置 secret EASYAI_CORE_TOKEN（主仓为私有仓库时必需）\n",
             file=sys.stderr,
         )
-        raise SystemExit(1) from exc
-    return IEnginePlugin, REQUIRED_PLUGIN_METHODS, validate_manifest_file
+        return _jsonschema_validator(), None, FALLBACK_REQUIRED_METHODS, "schema-only"
 
 
 def _resolve_module_file(plugin_dir: Path, module: str) -> Path | None:
@@ -82,11 +151,44 @@ def _resolve_module_file(plugin_dir: Path, module: str) -> Path | None:
     return None
 
 
+def _static_contract_check(
+    module_file: Path,
+    class_name: str,
+    required_methods: tuple[str, ...],
+    reporter: Reporter,
+    label: str,
+) -> None:
+    """不导入模块，直接看 AST 里该类是否实现了全部契约方法。
+
+    只能在降级模式用：它证明"方法写了"，但证明不了"方法有效"、
+    也证明不了"继承了 IEnginePlugin"或"可无参构造"。
+    """
+    try:
+        tree = ast.parse(module_file.read_text(encoding="utf-8"))
+    except SyntaxError as exc:
+        reporter.fail(label, f"语法错误（{module_file.name}）: {exc.msg} (line {exc.lineno})")
+        return
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            defined = {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            missing = [name for name in required_methods if name not in defined]
+            if missing:
+                reporter.fail(label, f"{class_name} 缺少契约方法: {missing}")
+            return
+
+    reporter.fail(label, f"模块 {module_file.name} 里没有类 {class_name}")
+
+
 def _check_entry_point(
     plugin_dir: Path,
     entry_point: str,
     *,
-    contract: type,
+    contract: type | None,
     required_methods: tuple[str, ...],
     reporter: Reporter,
 ) -> None:
@@ -99,6 +201,13 @@ def _check_entry_point(
     module_file = _resolve_module_file(plugin_dir, module_name)
     if module_file is None:
         reporter.fail(label, f"entry_point 指向的模块不存在: {module_name}")
+        return
+
+    # 降级模式：插件必然 `import sdk`，没有 SDK 时**导入一定失败**。
+    # 此时改用 AST 静态检查方法名 —— 不依赖 import，仍能挡住"漏写方法"这一最常见问题。
+    # （继承关系与"无参可构造"无法静态确认，已在降级 WARN 中声明）
+    if contract is None:
+        _static_contract_check(module_file, class_name, required_methods, reporter, label)
         return
 
     # 唯一模块名：防止多个插件同名模块在 sys.modules 里串味
@@ -134,7 +243,10 @@ def _check_entry_point(
     if cls is None:
         reporter.fail(label, f"模块 {module_name} 里没有类 {class_name}")
         return
-    if not isinstance(cls, type) or not issubclass(cls, contract):
+    if not isinstance(cls, type):
+        reporter.fail(label, f"{class_name} 不是类")
+        return
+    if contract is not None and not issubclass(cls, contract):
         reporter.fail(label, f"{class_name} 未继承 IEnginePlugin")
         return
 
@@ -171,7 +283,7 @@ def _check_files(plugin_dir: Path, reporter: Reporter) -> None:
 def validate_plugin(
     plugin_dir: Path,
     *,
-    contract: type,
+    contract: type | None,
     required_methods: tuple[str, ...],
     validate_manifest_file,
     reporter: Reporter,
@@ -230,7 +342,7 @@ def validate_plugin(
 
 
 def main() -> int:
-    contract, required_methods, validate_manifest_file = _load_contracts()
+    validate_manifest_file, contract, required_methods, mode = _load_validation_backends()
 
     plugins_root = Path(PLUGINS_DIRNAME)
     if not plugins_root.is_dir():
@@ -275,7 +387,7 @@ def main() -> int:
         print(f"\n[FAIL] 共 {len(reporter.problems)} 个问题", file=sys.stderr)
         return 1
 
-    print(f"[OK] {len(plugin_dirs)} 个插件全部通过校验")
+    print(f"[OK] {len(plugin_dirs)} 个插件全部通过校验（模式: {mode}）")
     for plugin_dir in plugin_dirs:
         print(f"     - {plugin_dir.name}")
     return 0
