@@ -124,7 +124,7 @@ curl localhost:8000/api/market/index/status
 本地调试索引时可以直接指 `file://`：
 
 ```bash
-export EASYAI_MARKET_INDEX_URL=file:///E:/01.Projects/easyai-plugins/index.json
+export EASYAI_MARKET_INDEX_URL=file:///E:/01.Projects/EasyAI/easyai-plugins/index.json
 ```
 
 > Windows 上 `file://` 必须是**三斜杠** `file:///E:/...`，否则盘符会丢。
