@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "EasyAI Community Plugins",
-  "updated_at": "2026-10-20T13:49:00Z",
+  "updated_at": "2026-10-20T14:22:26Z",
   "plugins": [
     {
       "plugin_id": "community.example-tone",
@@ -130,7 +130,7 @@
         }
       },
       "download_url": "https://github.com/Await-d/easyai-plugins/releases/download/latest/community.example-tone-0.1.0.zip",
-      "sha256": "90b4397abcd96512e3445e0ffb700bafdebb0621abe10b2b294b2e3952e7b1b3"
+      "sha256": "6c10ede63fdf3449bd5a2530edafedbeede3ae055e0bc0eff045ed1bdd3740e5"
     }
   ]
 }
