@@ -30,7 +30,8 @@ curl -X POST http://127.0.0.1:8000/api/plugins/install \
 curl -X POST http://127.0.0.1:8000/api/plugins/community.example-tone/activate
 ```
 
-> 宿主目前**尚不支持从索引一键安装**，需手动解压。详见仓库根 README。
+> 宿主支持**从索引直接安装**（需开启 `EASYAI_PLUGIN_ALLOW_MARKET_INSTALL`），
+> 也可手动解压到插件根。详见仓库根 README。
 
 ## 自检
 
