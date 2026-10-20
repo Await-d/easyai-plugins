@@ -53,6 +53,17 @@ RELEASE_TAG = "latest"
 EXCLUDED_DIRS = {"__pycache__", ".venv", "venv", ".git", ".pytest_cache", ".mypy_cache"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip"}
 
+#: 打包时按文本处理、需要把 CRLF 归一为 LF 的文件后缀。
+#: **这是跨平台可复现的关键**：Windows 工作区是 CRLF、Linux CI 是 LF，
+#: 若按原始字节打包，同一份源码在两边会算出不同的 sha256，
+#: 导致"本地生成的索引与 CI 生成的不一致"。
+TEXT_LIKE_SUFFIXES = {
+    ".py", ".md", ".json", ".txt", ".yml", ".yaml",
+    ".toml", ".cfg", ".ini", ".in", ".rst",
+}
+#: 无后缀但属于文本的文件名。
+TEXT_LIKE_NAMES = {"LICENSE", "NOTICE", ".gitignore"}
+
 #: zip 内时间戳固定值 —— 可复现构建的前提。
 FIXED_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
@@ -97,6 +108,18 @@ def _iter_plugin_files(plugin_dir: Path) -> list[Path]:
     return sorted(files, key=lambda p: p.relative_to(plugin_dir).as_posix())
 
 
+def _read_for_pack(path: Path) -> bytes:
+    """读取文件内容用于打包，**文本文件统一 CRLF → LF**。
+
+    不做归一化时，同一份源码在 Windows（CRLF）与 Linux CI（LF）会打出
+    不同字节的 zip，sha256 随之不同 —— 索引在任何一处生成，另一处就对不上。
+    """
+    data = path.read_bytes()
+    if path.suffix.lower() in TEXT_LIKE_SUFFIXES or path.name in TEXT_LIKE_NAMES:
+        return data.replace(b"\r\n", b"\n")
+    return data
+
+
 def pack_plugin(plugin_dir: Path, dist_dir: Path, *, version: str) -> tuple[Path, str]:
     """把插件目录打成可复现的 zip，返回 ``(zip 路径, sha256 hex)``。
 
@@ -113,9 +136,13 @@ def pack_plugin(plugin_dir: Path, dist_dir: Path, *, version: str) -> tuple[Path
             arcname = path.relative_to(plugin_dir).as_posix()
             info = zipfile.ZipInfo(arcname, date_time=FIXED_DATE_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
+            # ⚠️ ``create_system`` 默认值随平台变化：Windows 上是 0（FAT），
+            # Unix 上是 3。它**写进 zip 头部**，不固定的话同一份源码在
+            # Windows 与 Linux CI 上必然算出不同 sha256。
+            info.create_system = 3
             # 固定权限位，避免不同文件系统上 umask 差异影响摘要
             info.external_attr = 0o644 << 16
-            zf.writestr(info, path.read_bytes())
+            zf.writestr(info, _read_for_pack(path))
 
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     return archive, digest
