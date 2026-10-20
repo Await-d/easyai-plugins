@@ -26,6 +26,43 @@ EasyAI 引擎插件的**社区仓库**。与主仓 [EasyAI](https://github.com/A
 
 ---
 
+## 文档导航
+
+| 我想…… | 看这篇 |
+|---|---|
+| **第一次写插件** | [docs/creating-a-plugin.md](./docs/creating-a-plugin.md) —— 从复制示例到宿主内跑通合成 |
+| 查 `plugin.json` 字段与约束 | [docs/manifest-reference.md](./docs/manifest-reference.md) —— 含逐条报错含义 |
+| 本地反复调试、最后发布 | [docs/local-development.md](./docs/local-development.md) |
+| 出错了 | [docs/troubleshooting.md](./docs/troubleshooting.md) —— 按症状查 |
+| 提交规范与审核红线 | [CONTRIBUTING.md](./CONTRIBUTING.md) |
+
+## 5 分钟上手
+
+```bash
+# 0) 让 SDK 可导入（严格校验模式的前提）
+export PYTHONPATH=/path/to/EasyAI/backend
+
+# 1) 复制示例插件，目录名就是将来的 plugin.id
+cp -r plugins/community.example-tone plugins/acme.whisper-tts
+
+# 2) 改 4 处：
+#    plugin.json 的 id / name / entry_point
+#    适配器文件名（改成全局唯一的模块名，如 acme_whisper_tts.py）
+#    适配器里的类名（与 entry_point 冒号后一致）
+#    synthesize 的实现（换成你的推理调用，必须回 audio_path）
+
+# 3) 校验（数量随 plugins/ 下插件数变化）
+python scripts/validate.py
+# 预期：[OK] N 个插件全部通过校验（模式: sdk）
+
+# 4) 脱离宿主自检
+cd plugins/acme.whisper-tts && python acme_whisper_tts.py
+# 预期：... SELFTEST PASSED
+```
+
+想立刻看到"装进宿主、激活、合成出音频"的完整链路？
+跟 [docs/creating-a-plugin.md](./docs/creating-a-plugin.md) 的第 5 节走一遍。
+
 ## 目录结构
 
 ```

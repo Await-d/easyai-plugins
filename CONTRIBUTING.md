@@ -2,6 +2,9 @@
 
 感谢你为 EasyAI 贡献插件。本仓采用 **PR + 人工审核** 模式：CI 通过是必要条件，不是充分条件。
 
+> 第一次写插件？先看 [docs/creating-a-plugin.md](./docs/creating-a-plugin.md)，
+> 本文只讲**收录规则与审核标准**。
+
 ---
 
 ## 0. 提交前必做
