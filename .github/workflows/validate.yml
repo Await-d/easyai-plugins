@@ -1,0 +1,58 @@
+name: Validate Plugins
+
+# 只做校验，不产出任何文件。
+# 索引由 build-index.yml 在合并后自动重建 —— 贡献者不需要（也不允许）手改 index.json。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 需要完整历史才能与 base 分支比较（见下方"禁止手改 index.json"）
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Fetch EasyAI core (SDK contracts)
+        # ⚠️ 必须先在本仓库 Settings → Variables 里配置 EASYAI_CORE_REPO=owner/EasyAI，
+        #    否则会去 clone 占位地址而失败。
+        run: |
+          git clone --depth 1 "https://github.com/${{ vars.EASYAI_CORE_REPO || 'Await-d/EasyAI' }}" core
+
+      - name: Validate manifests and contracts
+        env:
+          PYTHONPATH: ${{ github.workspace }}/core/backend
+        run: python scripts/validate.py
+
+      - name: Reject committed build artifacts
+        # 本地跑过一次插件就会生成 __pycache__，validate.py 刻意不报它（会造成假失败）。
+        # 但**提交**上来必须挡住 —— 用 git 索引判定，而不是磁盘。
+        run: |
+          if git ls-files | grep -E '(__pycache__/|\.pyc$|\.pyo$|(^|/)\.venv/)'; then
+            echo "::error::禁止提交 __pycache__ / *.pyc / .venv"
+            exit 1
+          fi
+          echo "无构建产物被提交 ✅"
+
+      - name: Reject manual edits to generated index.json
+        if: github.event_name == 'pull_request'
+        run: |
+          if git diff --name-only "origin/${{ github.base_ref }}...HEAD" | grep -qx 'index.json'; then
+            echo "::error file=index.json::index.json 是生成物，请勿手工修改；合并后 CI 会自动重建。"
+            exit 1
+          fi
+          echo "index.json 未被手工修改 ✅"

@@ -1,0 +1,64 @@
+name: Build Index
+
+# 合并后：打包每个插件 → 上传 Release 资产 → 重建并提交 index.json。
+# 顺序很重要：**先**打包并算出 sha256，**再**写 index，**最后**上传。
+# 反过来会出现"index 里已有下载地址，但资产还没上传"的窗口期。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/**"
+      - "scripts/build_index.py"
+      - ".github/workflows/build-index.yml"
+  workflow_dispatch:
+
+permissions:
+  # 上传 Release 资产 + 提交 index.json 都需要写权限
+  contents: write
+
+concurrency:
+  # 并发重建会让 index 与资产短暂不一致，串行化
+  group: build-index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build index and packages
+        # GITHUB_REPOSITORY 由 Actions 自动注入，脚本据此拼 download_url
+        run: python scripts/build_index.py --pack
+
+      - name: Upload packages to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest plugin packages
+          body: |
+            由 CI 自动构建的插件包（每次合并 main 后更新）。
+
+            下载地址与 sha256 见仓库根目录的 index.json。
+          # 不匹配任何文件时应当失败 —— 否则会静默发布一个空 release
+          fail_on_unmatched_files: true
+          files: dist/*.zip
+
+      - name: Commit index.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.json
+          if git diff --staged --quiet; then
+            echo "index.json 无实质变化，跳过提交"
+            exit 0
+          fi
+          git commit -m "chore: rebuild index.json"
+          git push

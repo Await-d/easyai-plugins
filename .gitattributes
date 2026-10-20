@@ -1,0 +1,15 @@
+# 统一换行：本仓需与主仓（LF）保持一致，否则 schema 同步时会出现整文件差异。
+# 尤其在 Windows 上开发时，避免 CRLF 混入。
+* text=auto eol=lf
+
+*.py   text eol=lf
+*.json text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# 二进制不可自动转换
+*.zip binary
+*.png binary
+*.jpg binary
+*.wav binary

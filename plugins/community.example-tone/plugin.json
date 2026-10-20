@@ -1,0 +1,85 @@
+{
+  "plugin": {
+    "id": "community.example-tone",
+    "name": "Community Example Tone（社区示例引擎）",
+    "version": "0.1.0",
+    "engine_kind": "tts",
+    "api_version": ">=1.0,<2.0",
+    "entry_point": "example_tone:ExampleTonePlugin",
+    "license": "MIT",
+    "authors": ["你的名字 <you@example.com>"],
+    "description": "零第三方依赖的最小 TTS 插件模板：把文本渲染成 16bit/22050Hz/单声道 WAV，用于走通『扫描→安装→激活→合成→健康→停用→卸载』全链路。"
+  },
+  "isolation": {
+    "mode": "in_process",
+    "python": ">=3.10"
+  },
+  "hardware": {
+    "requires": {
+      "backend": ["cpu"],
+      "min_vram_gb": 0
+    },
+    "recommends": {
+      "backend": ["cpu"],
+      "min_vram_gb": 0
+    },
+    "cpu_fallback": true
+  },
+  "dependencies": {
+    "python_packages": [],
+    "pip_index_url": null,
+    "blacklist_conflicts": [],
+    "post_install": []
+  },
+  "permissions": {
+    "filesystem": ["models", "cache"],
+    "network": [],
+    "gpu": false
+  },
+  "models": {
+    "discovery": "explicit",
+    "default": "template-tone-v1",
+    "explicit": [
+      {
+        "name": "template-tone-v1",
+        "url": null,
+        "sha256": null
+      }
+    ]
+  },
+  "contributes": {
+    "capabilities": ["streaming", "cancel", "speed_control", "pitch_control", "volume_control"],
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "speed": {
+          "type": "number",
+          "minimum": 0.25,
+          "maximum": 4.0,
+          "default": 1.0,
+          "description": "语速倍率（音节时长 = 基线时长 / speed）"
+        },
+        "pitch": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 2.0,
+          "default": 1.0,
+          "description": "音调倍率（叠加到基频上）"
+        },
+        "volume": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 2.0,
+          "default": 1.0,
+          "description": "音量倍率（0.0 表示静音）"
+        }
+      }
+    },
+    "ui": {
+      "icon": null,
+      "category": "模板/演示",
+      "tags": ["零依赖", "可离线", "教学模板"],
+      "description": "复制后改 4 处即可变成你自己的引擎。音频走文件路径，不进 JSON。"
+    }
+  }
+}

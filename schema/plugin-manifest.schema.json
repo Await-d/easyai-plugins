@@ -1,0 +1,247 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://easyai.dev/schemas/plugin-manifest.schema.json",
+  "title": "EasyAI 引擎插件 manifest（v1）",
+  "description": "插件根目录 plugin.json 的 JSON Schema v1。与 backend/sdk/contracts.py 的 PluginManifest 结构同构：plugin / isolation / hardware / dependencies / permissions / models / contributes 七段。JSON 不支持注释，故每个字段以 description 自解释。校验由 backend/sdk/manifest_validator.py 驱动（零第三方依赖，不依赖 jsonschema 库）。",
+  "type": "object",
+  "required": ["plugin"],
+  "additionalProperties": false,
+  "properties": {
+    "plugin": {
+      "$ref": "#/definitions/plugin"
+    },
+    "isolation": {
+      "$ref": "#/definitions/isolation"
+    },
+    "hardware": {
+      "$ref": "#/definitions/hardware"
+    },
+    "dependencies": {
+      "$ref": "#/definitions/dependencies"
+    },
+    "permissions": {
+      "$ref": "#/definitions/permissions"
+    },
+    "models": {
+      "$ref": "#/definitions/models"
+    },
+    "contributes": {
+      "$ref": "#/definitions/contributes"
+    }
+  },
+  "definitions": {
+    "plugin": {
+      "type": "object",
+      "description": "插件身份与契约版本（唯一必填节）。",
+      "required": ["id", "name", "version", "engine_kind", "api_version", "entry_point"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 3,
+          "pattern": "^(?=.*\\.)[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$",
+          "description": "反向域名风格全局唯一标识，必须含点，如 easyai.engine.spark-tts。"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "插件展示名。"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "插件自身语义化版本，严格 X.Y.Z 三段式。"
+        },
+        "engine_kind": {
+          "type": "string",
+          "enum": ["tts", "asr", "llm", "audio_processing", "embedding"],
+          "description": "引擎种类（必填）。预留非 TTS 种类，避免后期全量改 schema。"
+        },
+        "api_version": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^\\s*(>=|<=|==|!=|>|<|=)?\\s*\\d+(\\.\\d+){0,2}\\s*(,\\s*(>=|<=|==|!=|>|<|=)?\\s*\\d+(\\.\\d+){0,2}\\s*)*$",
+          "description": "宿主契约兼容区间（必填），如 >=1.0,<2.0。宿主拒绝不兼容插件（VS Code engines 先例）。"
+        },
+        "entry_point": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*:[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "入口点 module:Class（必填），如 spark_tts_plugin:SparkTTSPlugin。"
+        },
+        "license": {
+          "type": ["string", "null"],
+          "description": "许可证 SPDX 标识，可选。"
+        },
+        "authors": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "作者列表。"
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "一句话说明。"
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "description": "隔离形态与 Python 版本约束（对齐 §3.2 三档谱系）。",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["in_process", "subprocess", "service"],
+          "description": "隔离等级：Tier0 进程内 / Tier1 每插件独立 venv（默认）/ Tier2 独立服务。"
+        },
+        "python": {
+          "type": ["string", "null"],
+          "pattern": "^\\s*(>=|<=|==|!=|>|<|=)?\\s*\\d+(\\.\\d+){0,2}\\s*(,\\s*(>=|<=|==|!=|>|<|=)?\\s*\\d+(\\.\\d+){0,2}\\s*)*$",
+          "description": "允许的 Python 版本区间，如 >=3.10,<3.12。"
+        }
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "description": "硬约束 requires 与软推荐 recommends 分离（§3.3 教训 2），避免边缘硬件用户误判。",
+      "additionalProperties": false,
+      "properties": {
+        "requires": {"$ref": "#/definitions/hardwareRequirement"},
+        "recommends": {"$ref": "#/definitions/hardwareRequirement"},
+        "cpu_fallback": {
+          "type": "boolean",
+          "description": "无满足硬件时是否允许回退 CPU 推理。默认 true。"
+        }
+      }
+    },
+    "hardwareRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backend": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["cuda", "rocm", "directml", "zluda", "cpu"]
+          },
+          "description": "可接受的计算后端集合，取值对齐 unified_device_service 探测结果。"
+        },
+        "min_vram_gb": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "description": "最低显存要求（GB）。requires 为硬阈值，recommends 为推荐阈值。"
+        }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "description": "独立 venv 依赖供给所需信息（供 DependencyProvisioner 复用）。",
+      "additionalProperties": false,
+      "properties": {
+        "python_packages": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "pip 依赖声明（PEP 508 规格字符串），如 torch>=2.0.0。"
+        },
+        "pip_index_url": {
+          "type": ["string", "null"],
+          "description": "覆盖 pip 源 index-url，如 ROCm/CUDA 专属 wheel 源。"
+        },
+        "blacklist_conflicts": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "已知冲突包，独立 venv 中禁止共存。"
+        },
+        "post_install": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "安装后自检命令。"
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "插件申请的权限（供安全基线使用）。",
+      "additionalProperties": false,
+      "properties": {
+        "filesystem": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "可读写的逻辑目录，如 models / cache。"
+        },
+        "network": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "允许访问的域名，如 huggingface.co / modelscope.cn。"
+        },
+        "gpu": {
+          "type": "boolean",
+          "description": "是否申请 GPU 权限。"
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "description": "模型发现方式与默认模型。",
+      "additionalProperties": false,
+      "properties": {
+        "discovery": {
+          "type": "string",
+          "enum": ["explicit", "huggingface", "modelscope"],
+          "description": "模型发现方式：explicit 显式列表（默认）/ huggingface / modelscope。"
+        },
+        "default": {
+          "type": ["string", "null"],
+          "description": "默认模型标识，如 SparkAudio/Spark-TTS-0.5B。"
+        },
+        "explicit": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/modelEntry"},
+          "description": "显式模型列表（discovery=explicit 时使用）。"
+        }
+      }
+    },
+    "modelEntry": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "模型名 / 标识。"
+        },
+        "url": {
+          "type": ["string", "null"],
+          "description": "下载地址。"
+        },
+        "sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[a-fA-F0-9]{64}$",
+          "description": "期望校验和（64 位十六进制）。"
+        }
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "description": "插件对外贡献的能力 / 参数 schema / UI 元数据。",
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string"},
+          "description": "能力标识列表，字符串取值见 sdk.capabilities.CAPABILITY_FLAGS。"
+        },
+        "params_schema": {
+          "type": "object",
+          "description": "可调参数的 JSON Schema（自由结构，宿主透传渲染）。"
+        },
+        "ui": {
+          "type": "object",
+          "description": "市场展示元数据（自由结构），如 icon / category。"
+        }
+      }
+    }
+  }
+}

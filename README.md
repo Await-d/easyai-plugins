@@ -1,0 +1,125 @@
+# EasyAI Community Plugins
+
+EasyAI 引擎插件的**社区仓库**。与主仓 [EasyAI](https://github.com/Await-d/EasyAI) 分离：
+
+- 主仓负责**宿主 + SDK 契约 + 内置引擎插件**（`backend/plugins/builtin/`）；
+- 本仓负责**社区插件**的收录、校验、打包与索引分发。
+
+这样插件可以独立迭代、独立审核，不必每次改动都触发宿主 CI；宿主也能保持"最小可信内核"。
+
+---
+
+## ⚠️ 先看这条限制
+
+**当前宿主还不支持从索引一键安装。** 索引负责「发现」，安装仍需要手动放文件。
+
+宿主侧已具备的能力：
+
+| 能力 | 状态 |
+|---|---|
+| 拉取并展示远程索引 | ✅ 已有（`EASYAI_MARKET_INDEX_URL`） |
+| 索引格式校验 / 缓存 / 离线降级 | ✅ 已有 |
+| 从**本地插件根**安装、激活、合成 | ✅ 完整 |
+| 从索引条目**下载 / 校验 / 解压** | ❌ **尚未实现** |
+
+因此现阶段：用户在市场里能看到插件、能下载 zip，但**需要手动解压到插件根**再安装。一键安装属于宿主侧后续任务。
+
+---
+
+## 目录结构
+
+```
+.
+├── index.json                  # ⚠️ 生成物，禁止手改（CI 重建）
+├── plugins/
+│   └── <publisher>.<plugin-id>/ # 目录名必须等于 plugin.json 的 plugin.id
+│       ├── plugin.json
+│       ├── <adapter>.py         # 模块名必须全局唯一
+│       ├── README.md            # 必需
+│       └── test_*.py            # 可选，鼓励
+├── schema/
+│   └── plugin-manifest.schema.json  # 从主仓同步，勿单独修改
+├── scripts/
+│   ├── validate.py              # 收录校验（CI 与本地共用）
+│   └── build_index.py           # 生成 index.json（唯一产出方式）
+└── .github/workflows/
+    ├── validate.yml             # PR 校验
+    └── build-index.yml          # 合并后打包 + 重建索引
+```
+
+---
+
+## 让宿主指向本仓库的索引
+
+设置环境变量（或写进部署配置）：
+
+```bash
+EASYAI_MARKET_INDEX_URL=https://raw.githubusercontent.com/Await-d/easyai-plugins/main/index.json
+```
+
+刷新索引：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/market/index/refresh
+curl http://127.0.0.1:8000/api/market/index/status
+```
+
+> `index.json` 必须先由 CI 生成（合并到 `main` 后自动完成）。首次建仓时本地跑一次
+> `python scripts/build_index.py --pack --repo Await-d/easyai-plugins` 也可以。
+
+---
+
+## 手动安装一个插件
+
+1. 从 [Releases](https://github.com/Await-d/easyai-plugins/releases/tag/latest) 下载 `<plugin_id>-<version>.zip`；
+2. 解压到插件根下、**以 `plugin_id` 命名**的目录：
+
+   ```
+   <插件根>/<plugin_id>/plugin.json
+   <插件根>/<plugin_id>/<adapter>.py
+   ```
+
+   插件根默认是 `<项目根>/.easyai/plugins`，可用 `EASYAI_PLUGIN_ROOT` 覆盖。
+3. 调用安装接口：
+
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/plugins/install \
+        -H 'Content-Type: application/json' \
+        -d '{"plugin_id": "community.example-tone"}'
+   ```
+
+4. 激活并试听：
+
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/plugins/community.example-tone/activate
+   ```
+
+---
+
+## 索引是怎么生成的
+
+**永远不要手改 `index.json`。** 它由 `scripts/build_index.py` 从 `plugins/*/plugin.json` 聚合出来：
+
+- 每个插件目录打成 **可复现的 zip**（固定时间戳、固定压缩级别、文件排序），
+  因此内容不变时 sha256 也不变；
+- 填充 `download_url`（指向 `latest` Release）与 `sha256`；
+- 内嵌完整 `manifest`，宿主无需再下载 `plugin.json` 即可判定可安装性。
+
+本地重建：
+
+```bash
+python scripts/validate.py                          # 先校验
+python scripts/build_index.py --pack --repo Await-d/easyai-plugins
+```
+
+---
+
+## 贡献
+
+见 [CONTRIBUTING.md](./CONTRIBUTING.md)。核心要求一句话：**`python scripts/validate.py` 全绿**。
+
+---
+
+## 许可证
+
+本仓代码与插件包采用 MIT（各插件目录内的 `LICENSE` 若存在，以该文件为准）。
