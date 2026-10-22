@@ -49,6 +49,16 @@ DIST_DIRNAME = "dist"
 MANIFEST_FILENAME = "plugin.json"
 RELEASE_TAG = "latest"
 
+#: 维护者手工维护的下线名单（``plugin_id -> {replacement, reason}``）。
+#:
+#: 为什么不在 manifest 里声明废弃
+#: ------------------------------
+#: 1. manifest 是**插件作者**的声明，"下架并让用户迁移"是**维护者**的决定；
+#: 2. schema 的 ``plugin`` 段是 ``additionalProperties: false``，且只能从主仓同步，
+#:    为它加字段要动主仓契约，代价与收益不成比例；
+#: 3. 下架本质是**注册表状态**，属于索引层而非插件自身属性。
+DEPRECATIONS_FILENAME = "deprecations.json"
+
 #: 打包时排除的目录名 / 后缀（非源码产物）。
 EXCLUDED_DIRS = {"__pycache__", ".venv", "venv", ".git", ".pytest_cache", ".mypy_cache"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip"}
@@ -236,9 +246,108 @@ def build_entries(
     return entries
 
 
-def build_index(*, repo_slug: str, pack: bool, dist_dir: Path) -> dict:
+def _version_key(text: str) -> tuple[int, tuple[int, ...]]:
+    """把 ``x.y.z`` 转成可排序 key；非法版本排在前面（schema 本应已拦住）。"""
+    numbers: list[int] = []
+    for part in text.split("."):
+        try:
+            numbers.append(int(part))
+        except ValueError:
+            return (0, ())
+    return (1, tuple(numbers))
+
+
+def _load_deprecations() -> dict[str, dict]:
+    """读 ``deprecations.json``；不存在视为空名单。
+
+    结构是 ``{"schema_version": 1, "deprecations": {plugin_id: {...}}}`` ——
+    **不能**把映射直接放顶层：JSON 不支持注释，任何说明性 key 都会被当成
+    plugin_id 校验而报错。
+    """
+    path = Path(DEPRECATIONS_FILENAME)
+    if not path.is_file():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise BuildError(f"{DEPRECATIONS_FILENAME} 不是合法 JSON: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise BuildError(f"{DEPRECATIONS_FILENAME} 顶层必须是对象")
+
+    entries = data.get("deprecations")
+    if entries is None:
+        return {}
+    if not isinstance(entries, dict):
+        raise BuildError(f"{DEPRECATIONS_FILENAME} 的 deprecations 必须是对象")
+    return entries
+
+
+def _previous_versions(index_path: Path) -> dict[str, list[dict]]:
+    """从现有 ``index.json`` 读出各插件的历史版本记录。
+
+    ``versions`` 必须**累加**而不是每次重建：否则发布 1.1.0 之后，
+    1.0.0 的下载地址与摘要就从索引里消失 —— 用户既无法回滚，
+    也无法"固定用旧版"。这与"只增不减"的兼容预期直接冲突。
+    """
+    if not index_path.is_file():
+        return {}
+
+    try:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return {}  # 现有索引坏了就当作没有历史，交给后续 --check 报差异
+
+    result: dict[str, list[dict]] = {}
+    for entry in data.get("plugins") or []:
+        if not isinstance(entry, dict):
+            continue
+        plugin_id = str(entry.get("plugin_id") or "")
+        versions = entry.get("versions")
+        if plugin_id and isinstance(versions, list):
+            result[plugin_id] = [item for item in versions if isinstance(item, dict)]
+    return result
+
+
+def _merge_versions(entry: dict, history: list[dict]) -> None:
+    """把当前版本并入历史清单：同版本覆盖、新版本追加、按版本升序。"""
+    current = {
+        "version": entry["version"],
+        "sha256": entry.get("sha256"),
+        "download_url": entry.get("download_url"),
+    }
+    merged = [item for item in history if item.get("version") != current["version"]]
+    merged.append(current)
+    merged.sort(key=lambda item: _version_key(str(item.get("version") or "")))
+    entry["versions"] = merged
+
+
+def _apply_deprecation(entry: dict, info: dict | None) -> None:
+    """把下线标记写进条目（宿主当前忽略这些字段，属向后兼容的扩展）。"""
+    if not info:
+        return
+
+    entry["deprecated"] = True
+    entry["replacement"] = str(info.get("replacement") or "")
+    reason = info.get("reason")
+    if reason:
+        entry["deprecation_reason"] = str(reason)
+
+
+def build_index(
+    *, repo_slug: str, pack: bool, dist_dir: Path, index_path: Path | None = None
+) -> dict:
     plugins_root = Path(PLUGINS_DIRNAME)
     entries = build_entries(plugins_root, repo_slug=repo_slug, pack=pack, dist_dir=dist_dir)
+
+    deprecations = _load_deprecations()
+    history = _previous_versions(index_path or Path(INDEX_FILENAME))
+    for entry in entries:
+        plugin_id = entry["plugin_id"]
+        _merge_versions(entry, history.get(plugin_id, []))
+        _apply_deprecation(entry, deprecations.get(plugin_id))
+
     return {
         "schema_version": 1,
         "name": "EasyAI Community Plugins",
@@ -266,14 +375,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dist", default=DIST_DIRNAME, help="zip 输出目录")
     args = parser.parse_args(argv)
 
+    target = Path(INDEX_FILENAME)
+
     try:
         repo_slug = _repo_slug(args.repo)
-        index = build_index(repo_slug=repo_slug, pack=args.pack, dist_dir=Path(args.dist))
+        index = build_index(
+            repo_slug=repo_slug,
+            pack=args.pack,
+            dist_dir=Path(args.dist),
+            index_path=target,
+        )
     except BuildError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1
 
-    target = Path(INDEX_FILENAME)
     rendered = _dump(index)
 
     if args.check:

@@ -122,3 +122,41 @@ export PYTHONPATH=/path/to/EasyAI/backend   # Windows: $env:PYTHONPATH="E:\...\E
 
 宿主侧的签名验证与权限沙箱尚未落地（主仓 T-21，条件触发）。
 在它落地前，请把本仓当作**半可信来源**：只安装你愿意在宿主机上运行的代码。
+
+---
+
+## 7. 下架一个插件（维护者）
+
+普通贡献者不需要这一节。下架是**维护者**动作 —— "让用户迁移"不能由插件作者自己宣布。
+
+编辑仓库根的 `deprecations.json`：
+
+```json
+{
+  "schema_version": 1,
+  "deprecations": {
+    "acme.old-tts": {
+      "replacement": "acme.new-tts",
+      "reason": "上游模型停止分发，功能已由 new-tts 覆盖"
+    }
+  }
+}
+```
+
+规则（CI 会校验，任一不满足即失败）：
+
+- `key` 必须是**已收录**的 `plugin_id`；
+- `replacement` 必须是**另一个已收录**的插件，**不能自我替代** ——
+  否则用户顺着"迁移到 X"点过去就是 404；
+- 下架**不删目录、不删包**：已安装的用户不受影响，只是索引条目带上
+  `deprecated: true` 与 `replacement`，市场可提示迁移。
+
+> 为什么不在 `plugin.json` 里声明废弃：`plugin` 段是
+> `additionalProperties: false` 且 schema 只能从主仓同步；而且下架是
+> **注册表状态**，不属于插件自身属性。
+
+### 彻底移除（不推荐）
+
+删插件目录 + 从 `deprecations.json` 移除对应条目，然后重建索引。
+代价是用户失去来源线索（连"它被换成了什么"都看不到），
+所以除非有安全或法律强制原因，请优先用上面的下线机制。

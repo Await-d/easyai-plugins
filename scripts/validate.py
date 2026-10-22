@@ -51,6 +51,9 @@ MIN_LICENSE_BYTES = 20
 #: 改动这些后缀的文件即视为「插件内容变更」，必须 bump version。
 VERSION_BUMP_SUFFIXES = (".py",)
 
+#: 维护者手工维护的下线名单（详见 build_index.py 同名常量处的说明）。
+DEPRECATIONS_FILENAME = "deprecations.json"
+
 #: 构建产物目录（由 .gitignore 覆盖；CI 用 ``git ls-files`` 检查是否被误提交）。
 FORBIDDEN_DIRS = {"__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache"}
 
@@ -458,6 +461,56 @@ def _check_schema_sync(core_schema: Path) -> int:
     return 1
 
 
+def _check_deprecations(plugin_ids: set[str]) -> int:
+    """校验 ``deprecations.json`` 的一致性，返回问题数。
+
+    "下线"是**注册表动作**，最容易出的错不是格式，而是**指向不存在的插件** ——
+    用户看到"已废弃，请迁移到 X"，点过去却是 404，比不提示更糟。
+    """
+    path = Path(DEPRECATIONS_FILENAME)
+    if not path.is_file():
+        return 0
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        print(f"[FAIL] {path} 不是合法 JSON: {exc}", file=sys.stderr)
+        return 1
+
+    entries = data.get("deprecations") if isinstance(data, dict) else None
+    if entries is None:
+        return 0
+    if not isinstance(entries, dict):
+        print(f"[FAIL] {path} 的 deprecations 必须是对象", file=sys.stderr)
+        return 1
+
+    problems = 0
+    for key, info in entries.items():
+        if key not in plugin_ids:
+            print(f"[FAIL] {path}: 引用了未收录的插件 {key!r}", file=sys.stderr)
+            problems += 1
+        if not isinstance(info, dict):
+            print(f"[FAIL] {path}[{key}] 必须是对象", file=sys.stderr)
+            problems += 1
+            continue
+
+        replacement = str(info.get("replacement") or "").strip()
+        if not replacement:
+            print(f"[FAIL] {path}[{key}] 缺少 replacement", file=sys.stderr)
+            problems += 1
+        elif replacement == key:
+            print(f"[FAIL] {path}[{key}] 不能自我替代", file=sys.stderr)
+            problems += 1
+        elif replacement not in plugin_ids:
+            print(
+                f"[FAIL] {path}[{key}] 的 replacement 未收录: {replacement!r}",
+                file=sys.stderr,
+            )
+            problems += 1
+
+    return problems
+
+
 def validate_plugin(
     plugin_dir: Path,
     *,
@@ -591,7 +644,9 @@ def main(argv: list[str] | None = None) -> int:
                     )
                 seen[plugin_id] = plugin_dir.name
 
-    if not reporter.ok() or schema_problems:
+    deprecation_problems = _check_deprecations(set(seen))
+
+    if not reporter.ok() or schema_problems or deprecation_problems:
         reporter.dump()
         if not reporter.ok():
             print(f"\n[FAIL] 共 {len(reporter.problems)} 个问题", file=sys.stderr)

@@ -164,7 +164,14 @@ curl http://127.0.0.1:8000/api/market/index/status
 - 填充 `download_url`（指向 `latest` Release）与 `sha256`；
 - 内嵌完整 `manifest`，宿主无需再下载 `plugin.json` 即可判定可安装性；
 - 带出 `api_version`（宿主契约兼容区间）：市场可以在**下载之前**就提示
-  "此插件要求更高版本的宿主"，而不是等用户装完、激活时才失败。
+  "此插件要求更高版本的宿主"，而不是等用户装完、激活时才失败；
+- 累加 **`versions`**（历史版本清单）：发布 1.1.0 之后，1.0.0 的 `sha256`
+  与下载地址仍留在索引里 —— 用户能回滚，也能固定使用旧版；
+- 若插件被登记在 `deprecations.json`（维护者操作），条目会带
+  **`deprecated: true`** 与 **`replacement`**，市场可提示"已废弃，请迁移到 X"。
+
+> `versions` / `deprecated` / `replacement` 都是**向后兼容的扩展**：
+> 宿主当前只读顶层的 `version` 与 `sha256`，会忽略这些字段。
 
 本地重建：
 

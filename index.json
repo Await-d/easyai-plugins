@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "EasyAI Community Plugins",
-  "updated_at": "2026-10-22T12:32:06Z",
+  "updated_at": "2026-10-22T12:39:35Z",
   "plugins": [
     {
       "plugin_id": "community.example-tone",
@@ -131,7 +131,14 @@
         }
       },
       "download_url": "https://github.com/Await-d/easyai-plugins/releases/download/latest/community.example-tone-0.1.0.zip",
-      "sha256": "4104b406cf3755185405037eaf29fad4ff162cd736acc12d9e629e79dd8c3afd"
+      "sha256": "4104b406cf3755185405037eaf29fad4ff162cd736acc12d9e629e79dd8c3afd",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "sha256": "4104b406cf3755185405037eaf29fad4ff162cd736acc12d9e629e79dd8c3afd",
+          "download_url": "https://github.com/Await-d/easyai-plugins/releases/download/latest/community.example-tone-0.1.0.zip"
+        }
+      ]
     }
   ]
 }
