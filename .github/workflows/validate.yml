@@ -19,10 +19,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 版本 bump 检查要跟基准分支做 diff（origin/<base>），shallow clone 拿不到。
-          fetch-depth: 0
-        with:
-          # 需要完整历史才能与 base 分支比较（见下方"禁止手改 index.json"）
+          # 需要完整历史：版本 bump 检查要与基准分支 diff（origin/<base>），
+          # shallow clone 拿不到；"禁止手改 index.json" 的判定也要 diff base。
           fetch-depth: 0
 
       - name: Setup Python
