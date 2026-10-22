@@ -162,7 +162,9 @@ curl http://127.0.0.1:8000/api/market/index/status
 - 每个插件目录打成 **可复现的 zip**（固定时间戳、固定压缩级别、文件排序），
   因此内容不变时 sha256 也不变；
 - 填充 `download_url`（指向 `latest` Release）与 `sha256`；
-- 内嵌完整 `manifest`，宿主无需再下载 `plugin.json` 即可判定可安装性。
+- 内嵌完整 `manifest`，宿主无需再下载 `plugin.json` 即可判定可安装性；
+- 带出 `api_version`（宿主契约兼容区间）：市场可以在**下载之前**就提示
+  "此插件要求更高版本的宿主"，而不是等用户装完、激活时才失败。
 
 本地重建：
 
@@ -187,6 +189,19 @@ python scripts/build_index.py --pack --repo Await-d/easyai-plugins
 `Settings → Secrets and variables → Actions` 添加 **`EASYAI_CORE_TOKEN`**
 （细粒度 PAT，仅需对 `Await-d/EasyAI` 的 `Contents: Read`）。
 
+### 每个插件的硬性要求
+
+`scripts/validate.py` 会逐条检查；CI 与本地跑的是同一份脚本。
+
+| 要求 | 为什么 | 在降级模式也检查？ |
+|---|---|---|
+| `README.md` **与** `LICENSE` | 收录第三方代码必须有许可证声明 | ✅ |
+| `LICENSE` 是**完整文本** | 只写一行 `MIT` 等于没写 | ✅ |
+| 目录名 == `plugin.id` | 打包文件名与安装目标目录都依赖它 | ✅ |
+| `plugin.api_version` 能被**当前宿主**满足 | 不满足 = 用户装上也用不了 | ❌ 需 SDK |
+| 改了 `plugin.json` / `*.py` 必须 **bump `version`** | 版本号不变而 sha256 变了，升级检测与回滚同时失效 | ✅（PR 上） |
+| 不得修改 `schema/` | 它是主仓副本，漂移会让 PR 全绿但装不上 | ❌ 需能读到主仓 |
+
 ## 贡献
 
 见 [CONTRIBUTING.md](./CONTRIBUTING.md)。核心要求一句话：**`python scripts/validate.py` 全绿**。
@@ -195,4 +210,7 @@ python scripts/build_index.py --pack --repo Await-d/easyai-plugins
 
 ## 许可证
 
-本仓代码与插件包采用 MIT（各插件目录内的 `LICENSE` 若存在，以该文件为准）。
+本仓自身的脚本与文档采用 MIT。
+
+**每个插件目录必须自带 `LICENSE`**（完整许可证文本，不是只写一行 `MIT`），
+以该文件为准 —— 收录第三方代码却没有许可证声明是法律风险，校验器会拒绝。

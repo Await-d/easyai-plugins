@@ -73,6 +73,59 @@ plugin.json: "id": "acme.whisper-tts"   ← 不一致
 + def __init__(self) -> None:
 ```
 
+### `[FAIL] xxx: 缺少 LICENSE` / `LICENSE 内容过短（N 字节）`
+
+每个插件目录都要有**完整许可证文本**。两个常见误区：
+
+| 写法 | 结果 |
+|---|---|
+| 目录里没有 `LICENSE` | 缺文件 |
+| `LICENSE` 里只写一行 `MIT` | 被判过短（阈值 20 字节），等于没有许可条款正文 |
+| 目录里放 `LICENSE`（完整 MIT 文本） | ✅ |
+
+正确做法：复制仓库根 `LICENSE` 全文到插件目录，再把版权行改成你自己的名字与年份。
+
+### `[FAIL] xxx: 内容已改动但 version 仍是 x.y.z`
+
+改了 `plugin.json` 或任意 `*.py`，却没改 `plugin.version`。
+
+为什么必须 bump：索引里 `version` 是给宿主判断"有没有新版"用的，`sha256`
+判断"包有没有变"。**版本不变而 sha256 变了**，用户要么收不到更新，
+要么回滚时定位到错误的包。
+
+```bash
+# 只改 README / LICENSE 不要求 bump，但改了代码就要：
+#   plugin.json:  "version": "0.1.0"  ->  "0.1.1"
+```
+
+> 本地跑 `validate.py` 不带 `--base-ref` 时不检查此项（避免未提交改动误报）；
+> CI 会用 `origin/<base>` 比对。
+
+### `[FAIL] xxx: api_version '>=2.0' 不被当前宿主 SDK 1.0.0 满足`
+
+你的区间超出了当前宿主的契约范围 —— 这样的插件**装上也用不了**，
+用户会经历安装 → 下载 → 解压 → 激活，最后才在激活阶段报错。
+
+两种处理：
+
+- 你的插件其实能在 1.x 上跑 → 把区间放宽（如 `>=1.0,<2.0`）；
+- 确实需要 2.0 的特性 → 等宿主发布 2.0 后再提交（可先开 issue 讨论）。
+
+> 此项仅在**严格模式**（能 `import sdk`）下检查；降级模式会跳过。
+
+### `[FAIL] schema 与主仓不一致`
+
+`schema/plugin-manifest.schema.json` 是**主仓的副本**，不是本仓的独立定义。
+
+**不要在本仓改规则**——改了会让 CI 与宿主用两套校验，PR 全绿但装不上。
+正确做法是用主仓文件覆盖：
+
+```bash
+cp /path/to/EasyAI/backend/sdk/schema/plugin-manifest.schema.json schema/
+```
+
+> CI 用 `--core-schema` 与主仓比对；拿不到主仓时会 `WARN` 跳过，而不是假装一致。
+
 ### `导入模块失败 ... ModuleNotFoundError: No module named 'sdk'`
 
 插件代码 `import sdk`，但当前环境找不到契约包。设置：

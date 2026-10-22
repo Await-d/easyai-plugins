@@ -60,6 +60,8 @@ export PYTHONPATH=/path/to/EasyAI/backend   # Windows: $env:PYTHONPATH="E:\...\E
 
 - **必须升 `plugin.version`**（严格三段 `x.y.z`）。宿主的升级/回滚按版本号工作，
   版本不变会让已安装用户永远收不到更新。
+  **CI 会检查**：改了 `plugin.json` 或 `*.py` 却没 bump 版本会直接失败
+  （只改 README / LICENSE 不要求 bump）。
 - 不兼容变更（改了 `entry_point`、删了能力、改了模型 id）请在 PR 描述里写明，
   并考虑升主版本号。
 
@@ -77,6 +79,10 @@ export PYTHONPATH=/path/to/EasyAI/backend   # Windows: $env:PYTHONPATH="E:\...\E
 | `entry_point` 校验失败 | 只能 `module:Class` 形式，且 module 必须是合法 Python 标识符（不能有 `-`） |
 | `契约方法缺失` | 8 个方法缺一不可，注意 `synthesize_stream` 要是 `async def` + `yield` |
 | `无参构造失败` | 在 `__init__` 里加了必填参数，或构造时就加载了重依赖 |
+| `缺少 LICENSE` / `LICENSE 内容过短` | 插件目录必须放完整许可证文本；只写一行 `MIT` 会被判为"过短" |
+| `内容已改动但 version 仍是 x.y.z` | 改了 `plugin.json` / `*.py` 就必须 bump `version` |
+| `api_version '...' 不被当前宿主 SDK ... 满足` | 你的区间超出宿主当前契约范围。要么放宽区间，要么等宿主升级后再提交 |
+| `schema 与主仓不一致` | 本仓 `schema/` 是主仓副本。**不要本地改规则**，用主仓文件覆盖即可 |
 | 插件里出现 `__pycache__` | 请提交前清理，`.gitignore` 已覆盖 |
 
 ---
