@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "name": "EasyAI Community Plugins",
-  "updated_at": "2026-10-20T14:22:26Z",
+  "updated_at": "2026-10-22T12:32:06Z",
   "plugins": [
     {
       "plugin_id": "community.example-tone",
       "name": "Community Example Tone（社区示例引擎）",
       "version": "0.1.0",
+      "api_version": ">=1.0,<2.0",
       "engine_kind": "tts",
       "description": "零第三方依赖的最小 TTS 插件模板：把文本渲染成 16bit/22050Hz/单声道 WAV，用于走通『扫描→安装→激活→合成→健康→停用→卸载』全链路。",
       "isolation_mode": "in_process",
@@ -130,7 +131,7 @@
         }
       },
       "download_url": "https://github.com/Await-d/easyai-plugins/releases/download/latest/community.example-tone-0.1.0.zip",
-      "sha256": "6c10ede63fdf3449bd5a2530edafedbeede3ae055e0bc0eff045ed1bdd3740e5"
+      "sha256": "4104b406cf3755185405037eaf29fad4ff162cd736acc12d9e629e79dd8c3afd"
     }
   ]
 }
