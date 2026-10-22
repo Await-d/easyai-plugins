@@ -1,0 +1,16 @@
+# 关闭「空白 issue」，强制走模板 —— 否则大量缺少 plugin_id / 复现步骤的 issue
+# 需要来回追问，反而拖慢处理。
+blank_issues_enabled: false
+
+contact_links:
+  - name: 安全漏洞（请勿开公开 issue）
+    url: https://github.com/Await-d/easyai-plugins/security/advisories/new
+    about: 任意代码执行、供应链投毒、校验绕过等，请走私密漏洞上报，见 SECURITY.md
+
+  - name: 我该怎么写插件？
+    url: https://github.com/Await-d/easyai-plugins/blob/main/docs/creating-a-plugin.md
+    about: 从复制示例到在宿主里跑通合成的完整教程
+
+  - name: 校验报错看不懂
+    url: https://github.com/Await-d/easyai-plugins/blob/main/docs/troubleshooting.md
+    about: 按症状查的排错手册（校验 / 安装 / 激活 / 合成 / 索引 / CI）

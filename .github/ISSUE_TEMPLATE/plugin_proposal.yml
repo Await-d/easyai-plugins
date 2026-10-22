@@ -1,0 +1,91 @@
+name: 提议收录一个插件
+description: 在动手写代码之前先确认「这个插件适合收录吗」
+title: "[proposal] "
+labels: ["proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **建议先开这个 issue，再提 PR。** 收录与否取决于许可证、依赖、硬件前提与
+        安全边界，先对齐可以省掉一轮返工。
+
+        写插件本身请看 [docs/creating-a-plugin.md](../blob/main/docs/creating-a-plugin.md)。
+
+  - type: input
+    id: plugin_id
+    attributes:
+      label: 打算用的 plugin_id
+      description: 必须含点、全局唯一、与目录名一致，例如 `acme.whisper-tts`
+      placeholder: acme.my-engine
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 引擎种类
+      options: [tts, asr, llm, audio_processing, embedding]
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 这个插件做什么
+      description: 一两句话 + 与已有插件的差异
+    validations:
+      required: true
+
+  - type: input
+    id: license
+    attributes:
+      label: 你将以什么许可证发布
+      description: 必须能给插件目录附上完整 LICENSE 文本（MIT / Apache-2.0 / BSD-3 ...）
+      placeholder: MIT
+    validations:
+      required: true
+
+  - type: textarea
+    id: deps
+    attributes:
+      label: 依赖与硬件要求
+      description: |
+        - Python 包（会进宿主 venv，**请尽量少**；能用标准库就别加依赖）
+        - 模型权重（大小、下载来源、是否需要 `sha256`）
+        - 硬件（CPU / CUDA 版本 / 显存下限）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: isolation
+    attributes:
+      label: 预期的隔离方式
+      description: 重依赖（torch/transformers）**必须**用 subprocess，否则会拖垮宿主
+      options:
+        - in_process（零依赖或极轻依赖）
+        - subprocess（重依赖，独立 venv）
+        - 还不确定，想听建议
+    validations:
+      required: true
+
+  - type: textarea
+    id: permissions
+    attributes:
+      label: 需要的权限
+      description: |
+        声明到 `manifest.permissions`：`filesystem`（models/cache/...）、`network`、
+        `gpu`。**只申请实际用到的**，多余权限会导致审核不通过。
+      placeholder: |
+        filesystem: ["models", "cache"]
+        network: []
+        gpu: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我理解插件代码会在用户机器上执行，不会包含下载后执行远程脚本、隐藏网络回传等行为
+          required: true
+        - label: 我拥有所提交代码的分发权，并能提供完整 LICENSE
+          required: true

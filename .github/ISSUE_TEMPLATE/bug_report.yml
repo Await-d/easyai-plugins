@@ -1,0 +1,67 @@
+name: 报告问题（插件或本仓脚本）
+description: 某个插件在本仓的描述/打包/安装上有问题，或校验脚本本身有 bug
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > ⚠️ **安全漏洞请勿在此上报**，请走 [私密漏洞上报](../security/advisories/new)，见 `SECURITY.md`。
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题出在哪里
+      options:
+        - 本仓收录的插件（安装/激活/合成失败）
+        - index.json（条目缺失、sha256 与包不一致、下载地址 404）
+        - scripts/validate.py（该拦的没拦，或误报）
+        - scripts/build_index.py（打包结果不可复现、内容不对）
+        - CI 工作流
+        - 文档错误
+    validations:
+      required: true
+
+  - type: input
+    id: plugin
+    attributes:
+      label: 相关 plugin_id 与版本
+      description: 若与具体插件有关，请填写。例如 `community.example-tone` 0.1.0
+      placeholder: plugin_id + version
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 期望行为 vs 实际行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: |
+        尽量给出可复制的最小步骤，例如：
+        1. `export EASYAI_MARKET_INDEX_URL=...`
+        2. `POST /api/plugins/install {"plugin_id": "..."}`
+        3. 返回 422 / ...
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: 环境
+      description: 宿主版本（`GET /api/health` 里的 version）、操作系统、Python 版本
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 贴 `error_code` 与关键堆栈（**请先去掉密钥、绝对路径、模型路径**）
+      render: shell

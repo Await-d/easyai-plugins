@@ -68,7 +68,9 @@ TEXT_LIKE_NAMES = {"LICENSE", "NOTICE", ".gitignore"}
 FIXED_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 #: 条目必须能从 manifest 映射到的字段（缺失则该插件不合法，直接失败）。
-REQUIRED_PLUGIN_FIELDS = ("id", "name", "version", "engine_kind", "entry_point")
+#: ``api_version`` 也在必填之列：它是「我需要哪个范围的宿主契约」，
+#: 缺了就只能靠内嵌 manifest 里那句字符串，市场列表无从提示兼容性。
+REQUIRED_PLUGIN_FIELDS = ("id", "name", "version", "engine_kind", "api_version", "entry_point")
 
 
 class BuildError(RuntimeError):
@@ -203,6 +205,9 @@ def build_entries(
             "plugin_id": plugin_id,
             "name": str(section.get("name") or plugin_id),
             "version": version,
+            # 宿主契约兼容区间（如 ">=1.0,<2.0"）。CI 会校验它能否被当前 SDK 满足；
+            # 放进索引是为了让市场在**下载前**就能提示"此插件要求更高版本宿主"。
+            "api_version": str(section.get("api_version") or ""),
             "engine_kind": str(section.get("engine_kind") or ""),
             "description": str(section.get("description") or ""),
             "isolation_mode": str((manifest.get("isolation") or {}).get("mode") or ""),

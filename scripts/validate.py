@@ -7,9 +7,16 @@
 2. 目录名 == ``plugin.id``（不一致会导致打包文件名与安装目标目录错位）；
 3. ``entry_point`` 可解析：模块文件存在、类可导入、是 ``IEnginePlugin`` 子类；
 4. 契约 **8 个方法**齐备，且类可**无参构造**（宿主就是这么构造它的）；
-5. 每个插件目录有 ``README.md``；
+5. 每个插件目录有 ``README.md`` 与 ``LICENSE``（**且 LICENSE 非空** ——
+   收录第三方代码没有许可证声明是法律风险，不是风格问题）；
 6. 插件目录内不得出现顶层 ``__init__.py``（会让插件目录变成包，与宿主的
-   "加 sys.path 后按模块名导入" 约定冲突）。
+   "加 sys.path 后按模块名导入" 约定冲突）；
+7. ``plugin.api_version`` 必须能被**当前宿主 SDK 版本**满足（仅严格模式）——
+   否则插件能过 CI、进索引，用户装完在激活时才失败；
+8. ``--base-ref``（可选）：``plugin.json`` 或 ``*.py`` 改了却没 bump
+   ``version`` → 失败。索引里的版本号必须诚实，否则升级检测与回滚都会失效；
+9. ``--core-schema``（可选）：本仓 ``schema/`` 副本必须与主仓一致 ——
+   副本漂移会让 PR 全绿但装不上。
 
 > ``__pycache__`` / ``*.pyc`` **不在此检查**：本地跑过一次就会出现，
 > 逐次报错只会制造假失败。是否被误提交由 CI 的 ``git ls-files`` 判定。
@@ -25,15 +32,24 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 PLUGINS_DIRNAME = "plugins"
 MANIFEST_FILENAME = "plugin.json"
-REQUIRED_FILES = ("README.md",)
+REQUIRED_FILES = ("README.md", "LICENSE")
+
+#: LICENSE 的最小字节数。只挡「写了个空文件或只写了一行 `MIT`」的情况，
+#: 不做 SPDX 解析 —— 判断许可证文本是否"合法"不是本脚本该做的事。
+MIN_LICENSE_BYTES = 20
+
+#: 改动这些后缀的文件即视为「插件内容变更」，必须 bump version。
+VERSION_BUMP_SUFFIXES = (".py",)
 
 #: 构建产物目录（由 .gitignore 覆盖；CI 用 ``git ls-files`` 检查是否被误提交）。
 FORBIDDEN_DIRS = {"__pycache__", ".venv", "venv", ".pytest_cache", ".mypy_cache"}
@@ -268,6 +284,16 @@ def _check_files(plugin_dir: Path, reporter: Reporter) -> None:
         if not (plugin_dir / name).is_file():
             reporter.fail(label, f"缺少 {name}")
 
+    license_file = plugin_dir / "LICENSE"
+    if license_file.is_file():
+        size = license_file.stat().st_size
+        if size < MIN_LICENSE_BYTES:
+            reporter.fail(
+                label,
+                f"LICENSE 内容过短（{size} 字节）：请放完整许可证文本，"
+                "而不是只写一个 SPDX 标识（如单独一行 MIT）",
+            )
+
     # 注意：这里**不**扫描 ``__pycache__`` / ``*.pyc``。
     # 它们是本地跑过一次就会出现的运行时产物（`.gitignore` 已覆盖），
     # 若在此报错，贡献者每次本地自检后都会看到假失败。
@@ -280,6 +306,158 @@ def _check_files(plugin_dir: Path, reporter: Reporter) -> None:
         )
 
 
+def _check_api_version(section: dict, reporter: Reporter, label: str, *, mode: str) -> None:
+    """``plugin.api_version`` 必须能被**当前宿主 SDK** 满足。
+
+    为什么必须在收录时校验
+    ----------------------
+    ``api_version`` 表达的是"我需要哪个范围的宿主契约"。若当前宿主不满足，
+    这个插件**装上去也用不了** —— 让它在索引里挂着，用户会依次经历
+    安装 → 下载 → 解压 → 激活，最后才在激活阶段报错。代价远高于 PR 阶段报红。
+
+    降级模式（无 SDK）下无法得知宿主版本，此处只做存在性检查；
+    "兼容性未校验"已在降级 WARN 里显式声明，不假装通过。
+    """
+    spec = str(section.get("api_version") or "").strip()
+    if not spec:
+        reporter.fail(label, "plugin.api_version 为空（必填，如 '>=1.0,<2.0'）")
+        return
+    if mode != "sdk":
+        return
+
+    try:
+        from sdk.version import SDK_API_VERSION, satisfies_version
+    except ImportError:  # pragma: no cover - 与 mode 判定同源，不会单独发生
+        return
+
+    try:
+        compatible = satisfies_version(SDK_API_VERSION, spec)
+    except ValueError as exc:
+        reporter.fail(label, f"api_version 格式非法 {spec!r}: {exc}")
+        return
+
+    if not compatible:
+        reporter.fail(
+            label,
+            f"api_version {spec!r} 不被当前宿主 SDK {SDK_API_VERSION} 满足 —— "
+            "用户装上也用不了；请调整区间，或等宿主升级后再提交",
+        )
+
+
+def _git(*args: str, cwd: Path) -> str | None:
+    """执行 git 并返回 stdout；失败（无 git / 无该引用 / 非仓库）返回 ``None``。"""
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def _check_version_bump(
+    plugin_dir: Path,
+    section: dict,
+    reporter: Reporter,
+    *,
+    repo_root: Path,
+    base_ref: str,
+) -> None:
+    """改了插件内容却没 bump ``version`` → 失败。
+
+    只把 ``plugin.json`` 与 ``*.py`` 算作"内容变更"；改 README / LICENSE
+    不要求 bump —— 否则文档修订也会逼人升版本，大家就会随手写个假版本号，
+    版本号反而更不可信。
+
+    版本号不变而包内容（sha256）变化会同时破坏两件事：
+    升级检测拿版本号判"有没有新版"，回滚拿版本号定位"上一个可用包"。
+    """
+    label = plugin_dir.name
+    relative = f"plugins/{plugin_dir.name}"
+
+    old_raw = _git("show", f"{base_ref}:{relative}/plugin.json", cwd=repo_root)
+    if old_raw is None:
+        return  # 基准里没有 → 新插件，无需 bump
+
+    try:
+        old_version = str((json.loads(old_raw).get("plugin") or {}).get("version") or "")
+    except ValueError:
+        return
+
+    new_version = str(section.get("version") or "")
+    if old_version != new_version:
+        return  # 已 bump
+
+    changed_raw = _git("diff", "--name-only", f"{base_ref}...HEAD", "--", relative, cwd=repo_root)
+    if changed_raw is None:
+        return
+
+    changed = [line.strip() for line in changed_raw.splitlines() if line.strip()]
+    content_changed = [
+        path
+        for path in changed
+        if path.endswith(VERSION_BUMP_SUFFIXES) or path.endswith(MANIFEST_FILENAME)
+    ]
+    if not content_changed:
+        return
+
+    shown = ", ".join(content_changed[:5])
+    more = " 等" if len(content_changed) > 5 else ""
+    reporter.fail(
+        label,
+        f"内容已改动但 version 仍是 {new_version}（改动: {shown}{more}）。"
+        "请 bump version：版本号不变而 sha256 变化会让升级检测与回滚同时失效。",
+    )
+
+
+def _check_schema_sync(core_schema: Path) -> int:
+    """本仓 ``schema/`` 副本必须与主仓一致，返回问题数。
+
+    ``schema/`` 是**副本**而不是独立定义：主仓改了字段约束而本仓没同步时，
+    插件会按旧规则通过校验、进索引，然后在用户机器上装不上。
+    """
+    local_path = Path("schema") / "plugin-manifest.schema.json"
+    if not local_path.is_file():
+        print(f"[FAIL] 缺少 {local_path}", file=sys.stderr)
+        return 1
+
+    if not core_schema.is_file():
+        print(
+            f"[WARN] 找不到主仓 schema（{core_schema}），跳过一致性检查。\n"
+            "       主仓为私有仓库时需配置 secrets.EASYAI_CORE_TOKEN 才能核对。",
+            file=sys.stderr,
+        )
+        return 0
+
+    try:
+        local = json.loads(local_path.read_text(encoding="utf-8"))
+        upstream = json.loads(core_schema.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        print(f"[FAIL] schema 无法解析: {exc}", file=sys.stderr)
+        return 1
+
+    if local == upstream:
+        print(f"[OK] schema 与主仓一致（{local_path}）")
+        return 0
+
+    print(
+        "[FAIL] schema 与主仓不一致 —— 主仓改了契约但本仓副本没同步。\n"
+        f"       本仓: {local_path}\n"
+        f"       主仓: {core_schema}\n"
+        "       修复: 用主仓文件覆盖本仓副本（schema/ 是副本，不要本地改规则）。",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def validate_plugin(
     plugin_dir: Path,
     *,
@@ -287,6 +465,9 @@ def validate_plugin(
     required_methods: tuple[str, ...],
     validate_manifest_file,
     reporter: Reporter,
+    mode: str = "sdk",
+    repo_root: Path | None = None,
+    base_ref: str | None = None,
 ) -> None:
     label = plugin_dir.name
 
@@ -336,13 +517,38 @@ def validate_plugin(
         reporter.fail(label, "plugin.entry_point 为空")
 
     _check_files(plugin_dir, reporter)
+    _check_api_version(section, reporter, label, mode=mode)
+
+    if repo_root is not None and base_ref:
+        _check_version_bump(
+            plugin_dir, section, reporter, repo_root=repo_root, base_ref=base_ref
+        )
 
     # 确保 payload 至少被解析过（避免"看起来通过但其实没读文件"）
     del manifest
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="校验 plugins/ 下的插件是否满足收录要求")
+    parser.add_argument(
+        "--base-ref",
+        default=None,
+        help="版本 bump 检查的基准引用（CI 传 origin/main）；不传则跳过该检查",
+    )
+    parser.add_argument(
+        "--core-schema",
+        default=None,
+        help="主仓 schema 文件路径，用于检测本仓副本是否漂移；不传则跳过",
+    )
+    args = parser.parse_args(argv)
+
     validate_manifest_file, contract, required_methods, mode = _load_validation_backends()
+
+    schema_problems = 0
+    if args.core_schema:
+        schema_problems = _check_schema_sync(Path(args.core_schema))
+
+    repo_root = Path(".").resolve()
 
     plugins_root = Path(PLUGINS_DIRNAME)
     if not plugins_root.is_dir():
@@ -365,6 +571,9 @@ def main() -> int:
             required_methods=required_methods,
             validate_manifest_file=validate_manifest_file,
             reporter=reporter,
+            mode=mode,
+            repo_root=repo_root,
+            base_ref=args.base_ref,
         )
         manifest_path = plugin_dir / MANIFEST_FILENAME
         if manifest_path.is_file():
@@ -382,9 +591,10 @@ def main() -> int:
                     )
                 seen[plugin_id] = plugin_dir.name
 
-    if not reporter.ok():
+    if not reporter.ok() or schema_problems:
         reporter.dump()
-        print(f"\n[FAIL] 共 {len(reporter.problems)} 个问题", file=sys.stderr)
+        if not reporter.ok():
+            print(f"\n[FAIL] 共 {len(reporter.problems)} 个问题", file=sys.stderr)
         return 1
 
     print(f"[OK] {len(plugin_dirs)} 个插件全部通过校验（模式: {mode}）")

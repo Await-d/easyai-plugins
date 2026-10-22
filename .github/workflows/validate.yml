@@ -19,6 +19,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # 版本 bump 检查要跟基准分支做 diff（origin/<base>），shallow clone 拿不到。
+          fetch-depth: 0
+        with:
           # 需要完整历史才能与 base 分支比较（见下方"禁止手改 index.json"）
           fetch-depth: 0
 
@@ -51,7 +54,15 @@ jobs:
       - name: Validate manifests and contracts
         env:
           PYTHONPATH: ${{ github.workspace }}/core/backend
-        run: python scripts/validate.py
+        run: |
+          # --base-ref  改了 plugin.json / *.py 却没 bump version → 失败。
+          #             PR 用 origin/<base>；push 到 main 时 base_ref 为空，回退 main
+          #             （此时 diff 为空，等价于不检查）。
+          # --core-schema  本仓 schema/ 是主仓副本，必须逐字一致 —— 副本漂移会让
+          #             PR 全绿但用户在真机上装不上。拿不到主仓时脚本会 WARN 跳过。
+          python scripts/validate.py \
+            --base-ref "origin/${{ github.base_ref || 'main' }}" \
+            --core-schema "core/backend/sdk/schema/plugin-manifest.schema.json"
 
       - name: Reject committed build artifacts
         # 本地跑过一次插件就会生成 __pycache__，validate.py 刻意不报它（会造成假失败）。
